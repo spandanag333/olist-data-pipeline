@@ -1,0 +1,26 @@
+paths:
+  source_csv: "/opt/airflow/datasets/olist"
+  raw_data: "/opt/airflow/data/raw"
+  processed_data: "/opt/airflow/data/processed"
+  merged_data: "/opt/airflow/data/merged"
+  db_path: "/opt/airflow/db/retail.db"
+
+
+fact_table: "olist_orders_dataset"
+
+relationships:
+  olist_customers_dataset:
+    fact_key: "customer_id"
+    dim_key: "customer_id"
+
+  olist_order_items_dataset:
+    fact_key: "order_id"
+    dim_key: "order_id"
+
+  olist_order_payments_dataset:
+    fact_key: "order_id"
+    dim_key: "order_id"
+
+  olist_order_reviews_dataset:
+    fact_key: "order_id"
+    dim_key: "order_id"

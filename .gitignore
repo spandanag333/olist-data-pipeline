@@ -1,0 +1,12 @@
+# Ignore data and DB files
+data/
+datasets/
+db/
+*.db
+
+# Ignore logs
+logs/
+
+# Ignore Python cache
+__pycache__/
+*.pyc
