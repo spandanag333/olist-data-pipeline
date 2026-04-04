@@ -10,12 +10,37 @@ The pipeline outputs clean, scalable datasets in **Parquet format**, following a
 
 ## ⚙️ Architecture
 - **Airflow DAGs** orchestrate the workflow:
-  - **Ingestion** → load raw CSVs into SQLite
+  - **Ingestion** → load raw CSVs into Postgres
   - **Transformation** → clean and normalize tables
   - **Merge** → build fact table with joins to dimension tables
 - **Docker Compose** manages Airflow, Postgres, Redis, and supporting services
-- **SQLite** used as lightweight warehouse for joins
+- **Postgres** used as the warehouse for joins
 - **Parquet** used for efficient, columnar storage
+
+---
+## 🏗️ Architecture Diagram
+
+```mermaid
+flowchart TD
+    subgraph Airflow["Apache Airflow (DAGs)"]
+        A[Ingestion Task] --> B[Transformation Task] --> C[Merge Task]
+    end
+
+    A -->|Raw CSVs| D[(PostgreSQL Database)]
+    B -->|Cleaned Tables| D
+    C -->|Fact + Dimension Tables| D
+
+    D -->|Export| E[Parquet Files]
+    E -->|BI-ready Outputs| F[Analytics / BI Tools]
+```
+---
+
+## 📊 DAG Workflow (Task Dependencies)
+
+```mermaid
+flowchart LR
+    A[Ingest Task] --> B[Transform Task] --> C[Merge Task]
+```
 
 ---
 
@@ -67,7 +92,7 @@ The pipeline outputs clean, scalable datasets in **Parquet format**, following a
 - **Python 3.8**
 - **Apache Airflow 2.8**
 - **Docker + Docker Compose**
-- **SQLite**
+- **Postgres**
 - **Pandas + PyArrow**
 
 ---
@@ -75,7 +100,7 @@ The pipeline outputs clean, scalable datasets in **Parquet format**, following a
 ## 📊 Example Outputs
 - `fact_orders.csv` → merged fact table
 - `fact_orders.parquet` → optimized columnar storage
-- Dimension tables available in SQLite for BI queries
+- Dimension tables available in Postgres for BI queries
 
 ---
 
@@ -134,7 +159,7 @@ This will spin up the Airflow webserver, scheduler, Postgres, Redis, and support
 ## 📈 Future Improvements
 - Add unit tests for scripts
 - Integrate with cloud storage (S3, GCS)
-- Replace SQLite with Postgres or BigQuery
+- Replace Postgres with BigQuery or Snowflake
 - Add monitoring dashboards
-
+- Parallelize transformations in DAG
 ---

@@ -1,7 +1,7 @@
 # scripts/merge_data.py
 import os
-import sqlite3
 import pandas as pd
+from sqlalchemy import create_engine
 
 from config_loader import load_config
 from logger import setup_logger
@@ -10,9 +10,14 @@ from logger import setup_logger
 config = load_config()
 logger = setup_logger()
 
-DB_PATH = config["paths"]["db_path"]
 MERGED_DIR = config["paths"]["merged_data"]
 os.makedirs(MERGED_DIR, exist_ok=True)
+
+# Postgres engine
+engine = create_engine(
+    f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@"
+    f"{os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT')}/{os.getenv('POSTGRES_DB')}"
+)
 
 def build_merge_query():
     """Build SQL join query dynamically from config.yaml."""
@@ -28,39 +33,65 @@ def build_merge_query():
     return query
 
 def merge_tables():
-    conn = sqlite3.connect(DB_PATH)
     fact_table = config["fact_table"]
     relationships = config.get("relationships", {})
 
-    merged_df = pd.read_sql_query(f"SELECT * FROM {fact_table}", conn)
-    logger.info(f"Fact table {fact_table} → {len(merged_df):,} rows")
+    # Start with fact table columns
+    select_parts = ["f.*"]
+    join_parts = []
 
     for dim_name, rel in relationships.items():
         # Get dimension columns
-        dim_cols = pd.read_sql_query(f"PRAGMA table_info({dim_name})", conn)["name"].tolist()
+        dim_cols = pd.read_sql_query(
+            f"SELECT column_name FROM information_schema.columns WHERE table_name='{dim_name}'",
+            engine
+        )["column_name"].tolist()
 
-        # Build SELECT with prefixed dimension columns
-        dim_select = ", ".join([f"d.{c} AS {dim_name}_{c}" for c in dim_cols])
+        # Prefix dimension columns to avoid duplicates
+        dim_select = ", ".join([f"d_{dim_name}.{c} AS {dim_name}_{c}" for c in dim_cols])
+        select_parts.append(dim_select)
 
-        join_query = (
-            f"SELECT f.*, {dim_select} "
-            f"FROM {fact_table} f "
-            f"LEFT JOIN {dim_name} d "
-            f"ON f.{rel['fact_key']} = d.{rel['dim_key']}"
+        # Add join clause
+        join_parts.append(
+            f"LEFT JOIN {dim_name} d_{dim_name} "
+            f"ON f.{rel['fact_key']} = d_{dim_name}.{rel['dim_key']}"
         )
 
-        merged_df = pd.read_sql_query(join_query, conn)
-        logger.info(
-            f"Orders merged with {dim_name} "
-            f"on {rel['fact_key']}={rel['dim_key']} → {len(merged_df):,} rows"
-        )
+    # Build final query: one FROM, multiple LEFT JOINs
+    query = f"SELECT {', '.join(select_parts)} FROM {fact_table} f " + " ".join(join_parts)
 
-    conn.close()
+    merged_df = pd.read_sql_query(query, engine)
+    logger.info(f"Merged fact table → {len(merged_df):,} rows")
     return merged_df
 
+rename_map = {
+    "olist_customers_dataset_clean_customer_unique_id": "cust_unique_id",
+    "olist_customers_dataset_clean_customer_zip_code_prefix": "cust_zip_code_prefix",
+    "olist_customers_dataset_clean_customer_city": "cust_city",
+    "olist_customers_dataset_clean_customer_state": "cust_state",
+    "olist_order_items_dataset_clean_order_item_id": "item_id",
+    "olist_order_items_dataset_clean_product_id": "product_id",
+    "olist_order_items_dataset_clean_seller_id": "seller_id",
+    "olist_order_items_dataset_clean_shipping_limit_date": "shipping_limit_date",
+    "olist_order_items_dataset_clean_price": "price",
+    "olist_order_items_dataset_clean_freight_value": "freight_value",
+    "olist_order_payments_dataset_clean_payment_sequential": "pay_sequential",
+    "olist_order_payments_dataset_clean_payment_type": "pay_type",
+    "olist_order_payments_dataset_clean_payment_installments": "pay_installments",
+    "olist_order_payments_dataset_clean_payment_value": "pay_value",
+    "olist_order_reviews_dataset_clean_review_id": "review_id",
+    "olist_order_reviews_dataset_clean_review_score": "review_score",
+    "olist_order_reviews_dataset_clean_review_comment_title": "review_comment_title",
+    "olist_order_reviews_dataset_clean_review_comment_message": "review_comment",
+    "olist_order_reviews_dataset_clean_review_creation_date": "review_creation_date",
+    "olist_order_reviews_dataset_clean_review_answer_timestamp": "review_answer_timestamp"
+}
+
+
+
 def save_fact_table(df):
-    out_path_csv = os.path.join(MERGED_DIR, "fact_orders.csv")
-    out_path_parquet = os.path.join(MERGED_DIR, "fact_orders.parquet")
+    out_path_csv = os.path.join(MERGED_DIR, "fact_orders_star.csv")
+    out_path_parquet = os.path.join(MERGED_DIR, "fact_orders_star.parquet")
 
     df.to_csv(out_path_csv, index=False)
     df.to_parquet(out_path_parquet, index=False)
@@ -69,9 +100,12 @@ def save_fact_table(df):
 
 
 def main():
-    logger.info("Starting SQL‑based merge pipeline...")
+    logger.info("Starting merge pipeline...")
     fact_df = merge_tables()
     if fact_df is not None:
+        # Apply renaming here
+        fact_df = fact_df.rename(columns=rename_map)
+
         save_fact_table(fact_df)
         logger.info("Merge pipeline completed successfully.")
     else:
